@@ -1,0 +1,36 @@
+### Flow: Type > Axon > Mix
+
+### Folders
+# main folder: "./data"
+# original data: "./data/nrn_original" (.swc)
+# cleaned data: "./data/nrn_cleaned"
+# model results: "./data/nrn_result"
+# plots: "./data/nrn_plot"
+
+
+### Axon
+# A. Data_Cleaner: remove small leaf
+# 1. Create original dfs: original data and distance
+# 2. Create reduced dfs: reduced data, distance, and level_descend
+# 3. Output:
+#       5-HT1B-F-500013.pkl: original data of a nrn.
+#       5-HT1B-F-500013_leaf5.pkl: use leaf method to remove and the target level is 5.
+
+
+# B. Prepare_Axon: read in cleaned data from Data_Cleaner
+# 1. Data point: each node in level tree WITHOUT soma
+# 2. features=[s0, d0, d1,...] by using only reduced level tree & DO NOT drop first fork
+# 3. label={'axon':1, 'dendrite':0}
+# 4. Create df with features and label
+# 5. Output:
+#       prepared_axon_leaf5.pkl: prepare feature and label for axon classification.
+
+
+# C. Classify_Axon: read in prepared data from Prepare_Axon
+# 1. Create train & test set
+# 2. Run model & Evaluate model
+# 3. Outputs:
+#       result_axon_leaf5_normal.pkl: train=test=normal, sampling the test & train set w/o replacement.
+#       result_axon_leaf5_replace20_normal.pkl: train=test=normal, sampling w/ replacement for 20 times.
+#       result_axon_leaf5_normal&small.pkl: train=normal, test=small, no sampling.
+
