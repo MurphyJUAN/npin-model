@@ -48,9 +48,11 @@ rerun_mdl = False    # True: not use trained dnn model to predict
 relabel = True       # True: use post_relabel to evaluate
 show = True          # True: show evaluation result
 
+# plot
 only_terminal=True   # True: plot terminal only
 branch_col="l"       # None: show no branch length; "l": show branch length
 show_node_id=True    # True: plot nodes with id number
+ground_true=False
 
 
 ########################################################################################################################
@@ -125,6 +127,7 @@ class Classify_Axon:
         self.train_nrn_lst = sorted(self.train_nrn_lst)
         self.test_nrn_lst = sorted(self.test_nrn_lst)
 
+        # for net work
         self.test_set = [self.test_nrn_lst for i in range(self.with_replacement)]
         self.train_set = [self.train_nrn_lst for i in range(self.with_replacement)]
         # test & train samples
@@ -197,11 +200,8 @@ class Classify_Axon:
             if all([self.train_nrn_type == self.test_nrn_type, type(self.with_replacement) is int]):
                 self.train_set, self.test_set = dict_sampling(group_dict, pct=self.sample_pct, sample_times=self.with_replacement, min=1)
 
-
         self.axon_classified_dict["sample_test_set"] = self.test_set
         self.axon_classified_dict["sample_train_set"] = self.train_set
-
-
 
         # Create fake nrn lst
         self.fk_nrn_name_lst = []
@@ -363,6 +363,7 @@ class Classify_Axon:
         self.only_terminal = only_terminal
         self.branch_col = branch_col
         self.show_node_id = show_node_id
+        self.ground_truth = ground_truth
         if not self._is_ready():
             self.classify_data()
         self._load_data()
@@ -385,11 +386,11 @@ class Classify_Axon:
                 break
         return x
 
-
+    
     def _load_data(self):
         self.axon_classified_dict = {}
         for k, v in self.fname_dict.items():
-            with open(self.sys_path + v, "rb") as file:
+            with open(v, "rb") as file:
                 self.axon_classified_dict[k] = pickle.load(file)
         return
 
@@ -419,7 +420,7 @@ class Classify_Axon:
 
         self.test = pyramid(df, self.features, self.pyr_layer, self.th_layer, for_train=False, empty_number=-1)
         self.train = pyramid(_df, self.features, self.pyr_layer, self.th_layer, for_train=True, empty_number=-1)
-        a=123
+        
         # with open("./data/nrn_cleaned/prepare_axon", "rb") as file:
         #     df = pickle.load(file)
         #
@@ -492,7 +493,10 @@ class Classify_Axon:
         print("Run Axon Models...")
 
         # csu todo: remove while pyramid complete
-        feature_lst = list(set(self.test.columns) - set(["nrn", "ID"]))
+        feature_lst = []
+        for j in self.features:
+            for k in range(2 ** self.pyr_layer - 1):
+                feature_lst.append(j + "_" + str(k + 1))
 
         bar = progressbar.ProgressBar()
         time.sleep(0.01)
@@ -530,23 +534,24 @@ class Classify_Axon:
                     if model_name == "dnn":
                         sp = self.model_fname_dict[model_name][idx0] + "-" + str(e) + ".pkl"
                     elif model_name == "xgb":
-                        sp = self.model_fname_dict[model_name][idx0] + "-" + str(e) + ".model"
+                        sp = self.model_fname_dict[model_name][idx0] + "-" + str(e) + ".pkl"
 
                     # use exist models to predict
                     if all([os.path.exists(sp), not self.rerun_mdl]):
                         if model_name == "dnn":
                             model1.save_dir(sp)
                         elif model_name == "xgb":
-                            model1 = XGBClassifier()  # init model
-                            model1.load_model(sp)  # load data
+                            with open(sp, "rb") as file:
+                                model1 = pickle.load(file)
                         pred_proba = model1.predict_proba(np.array(test_df[feature_lst]))
                     # run new models
                     else:
                         if model_name == "dnn":
                             model.save_dir(sp)
                         y_test, y_pred, pred_proba, model1 = classification(train_df, test_df, label=['label'], features=feature_lst, model=model)
-                        if model_name =="xgb":
-                            model1.save_model(sp)
+                        if model_name =="xgb":  # save xgb only
+                            with open(sp, "wb") as file:
+                                pickle.dump(model1, file=file)
 
 
                     test_df2 = test_df[['nrn', 'ID']].copy()
@@ -592,12 +597,15 @@ class Classify_Axon:
 
     def _predict(self, prob_threshold):
         print("Predict...")
-        sys_path = os.path.dirname(__file__)
-        feature_lst = list(set(self.test.columns) - set(["nrn", "ID"]))
+        
+        feature_lst = []
+        for j in self.features:
+            for k in range(2 ** self.pyr_layer - 1):
+                feature_lst.append(j + "_" + str(k + 1))
 
         bar = progressbar.ProgressBar()
         time.sleep(0.01)
-        for model_name, model in bar(self.models.items()):
+        for model_name, _ in bar(self.models.items()):
             # check if result exist
             if all([os.path.exists(self.fname_dict[model_name]), not self.overwrite]):
                 continue
@@ -611,17 +619,20 @@ class Classify_Axon:
                 for e in range(self.mdl_ensemble[model_name]):
                     # find saved model path
                     if model_name == "dnn":
-                        sp = sys_path + self.trained_model_fname_dict[model_name][idx0] + "-" + str(e) + ".pkl"
+                        sp = self.trained_model_fname_dict[model_name][idx0] + "-" + str(e) + ".pkl"
                     elif model_name == "xgb":
-                        sp = sys_path + self.trained_model_fname_dict[model_name][idx0] + "-" + str(e) + ".model"
+                        sp = self.trained_model_fname_dict[model_name][idx0] + "-" + str(e) + ".pkl"
+
                     # use exist models to predict
                     if os.path.exists(sp):
                         if model_name == "dnn":
                             model1.save_dir(sp)
                         elif model_name == "xgb":
-                            model1 = XGBClassifier()  # init model
-                            model1.load_model(sp)  # load trained parameters
+                            with open(sp, "rb") as file:
+                                model1 = pickle.load(file)
+                        random.seed(123)
                         pred_proba = model1.predict_proba(np.array(test_df[feature_lst]))
+
                     else:
                         print("No trained model available for prediction.")
 
@@ -629,13 +640,13 @@ class Classify_Axon:
                     test_df2 = test_df[['nrn', 'ID']].copy()
                     if model_name == "dnn":
                         test_df2['prob'] = pred_proba
-                    else:
-                        test_df2['prob'] = pred_proba[:, 1]
-
-                    if test_df3 is None:
                         test_df3 = test_df2
                     else:
-                        test_df3 = test_df3.append(test_df2)
+                        test_df2['prob'] = pred_proba[:, 1]
+                        if test_df3 is None:
+                            test_df3 = test_df2
+                        else:
+                            test_df3 = test_df3.append(test_df2)
 
                     del model1, sp
 
@@ -643,36 +654,56 @@ class Classify_Axon:
             test_df3 = test_df3.groupby(["nrn", self.child_col], as_index=False)["prob"].mean()
             self.axon_classified_dict["avg_result"] = test_df3.sort_values(['nrn', 'ID']).reset_index(drop=True)
 
-            # save result
-            with open(sys_path + self.fname_dict[model_name], "wb") as file:
-                pickle.dump(self.axon_classified_dict, file=file)
+            # # save result
+            # with open(self.fname_dict[model_name], "wb") as file:
+            #     pickle.dump(self.axon_classified_dict, file=file)
+            
+            
+            # cj todo: Post-relabel
+            '''
+            0. (done)open a new branch for this issue
+            1. (done)add new empty folder "nrn_pred" to "./data" & also add it to .gitignore.
+            2. (done)use prob_threshold as your logic gate (if prob_threshold=None then ignore; if 0<prob_threshold<1 then use post-relabel & save).
+            4. (done)create the neuron list and loop over the list: 1. add post relabel columns 2. save new swc to new folder "./data/nrn_pred".
+            5. put dnn result behind xgb
+            '''
+            #post relabel
+            if prob_threshold == None :
+                print("No probability threshold.")
+            elif prob_threshold >1 or prob_threshold <0 :
+                print("Probability threshold is not in range 0 to 1.")
+            elif prob_threshold != None :
+               # for m in list(self.models.keys()):
+                #     df = self.axon_classified_dict[m]["avg_result"]
+                    # df = post_relabel(df, threshold=self.prob_threshold)
+
+                # 1. read in original dataframe for post-relabel
+                ax0 = Prepare_Axon(self.input_folder, self.test_nrn_type, self.remove_method, self.target_level)
+                ax0 = ax0.load_data()
+                df0 = ax0.prepare_dict["forEvaluate"]
+                del ax0
+                gc.collect()
+
+                # 2. merge "avg_result" to "forEvaluate"
+                df = self.axon_classified_dict["avg_result"]
+                df = pd.merge(df0, df, how="left", on=['nrn', 'ID'])
+
+
+                # 3. post relabel
+                df = post_relabel(df, threshold=self.prob_threshold)
+                #try for repeat until not bad
+                # if len(list(df['type_post'])) == 0 :
+                #     self._predict(prob_threshold)
+                # elif max(list(df['type_post'])) == min(list(df['type_post'])) :
+                #     self._predict(prob_threshold)
+                # else :
+                #     pass
+
+            # # save result
+            # with open(self.fname_dict[model_name], "wb") as file:
+            #     pickle.dump(self.axon_classified_dict, file=file)
 
         time.sleep(0.01)
-
-        # cj todo: Post-relabel
-        '''
-        0. (done)open a new branch for this issue
-        1. (done)add new empty folder "nrn_pred" to "./data" & also add it to .gitignore.
-        2. (done)use prob_threshold as your logic gate (if prob_threshold=None then ignore; if 0<prob_threshold<1 then use post-relabel & save).
-        4. (done)create the neuron list and loop over the list: 1. add post relabel columns 2. save new swc to new folder "./data/nrn_pred".
-        5. put dnn result behind xgb
-        '''
-        #post relabel
-        if prob_threshold == None :
-            print("No probability threshold.")
-        elif prob_threshold != None :
-            df = self.axon_classified_dict["avg_result"]
-            df = post_relabel(df, threshold=self.prob_threshold)
-            if len(list(df['type_post'])) == 0 :
-                self._predict(prob_threshold)
-            elif max(list(df['type_post'])) == min(list(df['type_post'])) :
-                self._predict(prob_threshold)
-            else :
-                pass
-
-        # save result
-        with open(sys_path + self.fname_dict[model_name], "wb") as file:
-            pickle.dump(self.axon_classified_dict, file=file)
 
         #save result into nrn_pred
         for test_swc_name in self.test_nrn_lst :
@@ -681,7 +712,7 @@ class Classify_Axon:
                 nrn = nm.io.swc.read(fname_swc)
                 origin_cols = ['X','Y','Z','D/2','R','ID','PARENT_ID']
                 df0 = pd.DataFrame(nrn.data_block,columns=origin_cols)
-                df1 = df.drop(['nrn','prob'],axis=1)
+                df1 = df.drop(['nrn', 'prob','PARENT_ID','NC','type_pre'], axis=1)
 
                 for i in range(len(df)) :
                     if df['nrn'][i] != test_swc_name :
@@ -689,20 +720,21 @@ class Classify_Axon:
 
                 #replace R with result : for network
                 df0 = df0.drop(['R'], axis=1)
+                df1.loc[df1.ID == 1, 'type_post'] = 1
                 df1 = df1.rename(columns={'type_post': 'R'})
                 df2 = pd.merge(df0, df1, on='ID', how='outer')
                 df2 = df2.loc[:,['ID','R','X','Y','Z','D/2','PARENT_ID']]
 
-                # if model_name == 'xgb' :
-                #     df1=df1.rename(columns={'type_post':'type_xgb'})
-                #     df2 = pd.merge(df0,df1,on='ID',how='outer')
-                    # df0['type_xgb'] = df['type_post']
-                # elif model_name == 'dnn' :
-                #     df1=df1.rename(columns={'type_post': 'type_dnn'})
-                #     df2 = pd.merge(df0, df1, on='ID',how='outer')
-                    # df0['type_dnn'] = df['type_post']
+                # if model_name == 'xgb':
+                #     df1.loc[df1.ID == 1,'type_post'] = 1
+                #     df1 = df1.rename(columns={'type_post': 'type_xgb'})
+                #     df2 = pd.merge(df0, df1, on='ID', how='outer')
+                # elif model_name == 'dnn':
+                #     df1.loc[df1.ID == 1, 'type_post'] = 1
+                #     df1 = df1.rename(columns={'type_post': 'type_dnn'})
+                #     df2 = pd.merge(df0, df1, on='ID', how='outer')
 
-                df2 = df2.fillna(1, limit=1)
+                # df2 = df2.fillna(1, limit=1)
                 df2 = df2.fillna(0)
                 # df2.index = df2.index + 1
                 df2[['ID','PARENT_ID','R']] = df2[['ID','PARENT_ID','R']].astype(int)
@@ -711,7 +743,7 @@ class Classify_Axon:
                 pre_f = pd.read_csv(self.input_folder + "nrn_pred/" + test_swc_name + "_predicted" + ".swc",
                                     sep=' ',index_col=None,header=0)
                 df0 = pd.DataFrame(pre_f)
-                df1 = df.drop(['nrn', 'prob'], axis=1)
+                df1 = df.drop(['nrn', 'prob','PARENT_ID','NC','type_pre'], axis=1)
 
                 for i in range(len(df)) :
                     if df['nrn'][i] != test_swc_name :
@@ -719,6 +751,7 @@ class Classify_Axon:
 
                 # replace R with result : for network
                 df0 = df0.drop(['R'],axis=1)
+                df1.loc[df1.ID == 1, 'type_post'] = 1
                 df1 = df1.rename(columns={'type_post': 'R'})
                 df2 = pd.merge(df0, df1, on='ID', how='outer')
                 df2 = df2.loc[:, ['ID', 'R', 'X', 'Y', 'Z', 'D/2', 'PARENT_ID']]
@@ -740,7 +773,7 @@ class Classify_Axon:
                 #     df2 = pd.merge(df0, df1, on='ID',how='outer')
                     # df0['type_dnn'] = df['type_post']
 
-                df2 = df2.fillna(1, limit=1)
+                # df2 = df2.fillna(1, limit=1)
                 df2 = df2.fillna(0)
                 # df2.index=df2.index+1
                 df2[['ID','PARENT_ID','R']] = df2[['ID','PARENT_ID','R']].astype(int)
@@ -803,7 +836,7 @@ class Classify_Axon:
 
             # Full "original" level tree
             if df0 is None:
-
+                # Read in original dataframe for post-relabel
                 ax0 = Prepare_Axon(self.input_folder, self.test_nrn_type, self.remove_method, self.target_level)
                 ax0 = ax0.load_data(["forEvaluate"])
                 df0 = ax0.prepare_dict["forEvaluate"]
@@ -848,6 +881,7 @@ class Classify_Axon:
 
 
             for pred_prob in self.prob_thresholds:
+                # merge "avg_result" to "forEvaluate"
                 df = self.axon_classified_dict[m]["avg_result"]
                 df = pd.merge(df0, df, how="left", on=['nrn', 'ID'])
                 # df = df.loc[~df["nrn"].isin(group_dict["Type_LOB_OG"])]
@@ -961,6 +995,8 @@ class Classify_Axon:
     def _plot_result(self):
         print("Plotting...")
 
+
+        # csu todo: add forEvaluate
         df0 = None
         bar = progressbar.ProgressBar()
         time.sleep(0.01)
@@ -1021,6 +1057,9 @@ class Classify_Axon:
                 save_path = input_folder + "nrn_plot/result_tree/" + m + "/"
                 # fname = save_path + nrn + ".gv." + self.file_type
 
+                if self.ground_truth is False:
+                    self.type_col = None
+
                 plot_tree_typePost(df.loc[df["nrn"]==nrn], self.child_col, self.parent_col, self.type_col, "type_post", save_path, self.file_type, self.file_size, self.only_terminal, self.branch_col, self.show_node_id)
             # print(len(lst0))
             # print(lst0)
@@ -1028,7 +1067,7 @@ class Classify_Axon:
             # print(lst1)
         return
 
-
+    
     def correct_distribution(self, model, prob_threshold):
         '''
         Plot the correct distribution of the prediction of the specific brain area.
