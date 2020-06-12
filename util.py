@@ -1455,17 +1455,20 @@ def plot_tree_typePost(df, child_col, parent_col, label_col, pred_col, save_path
     df = df.sort_values(["dp_level", child_col], ascending=[False, True]).reset_index(drop=True)
     total_node = [1] + df.ix[:, child_col].tolist()
 
-    df[label_col] = np.where(df[label_col]==0, np.nan, df[label_col])
+    if label_col is not None:
+        df[label_col] = np.where(df[label_col] == 0, np.nan, df[label_col])
     if only_terminal:
         df[pred_col] = np.where(df["NC"]!=0, np.nan, df[pred_col])
 
-    ### Plotting
-    # file name
+    # Plotting
+    # 1. file name
     filename = df.ix[0, "nrn"]
+    if label_col is None:
+        filename = "pre_" + filename
     u = Digraph(filename, format=file_type)
     u.attr(size=fig_size, bgcolor='transparent' )
-
-    # plot nodes
+    
+    # 2. plot nodes
     dict0 = {2: 'green3', 3: 'brown1', 4: 'darkorchid1', 1:'black'}  # fill in
     # dict0 = {2: 'palegreen1', 3: 'lightpink', 4: 'plum', 1:'black'}  # fill in
     # dict1 = {2: 'green4', 3: 'red', 4: 'purple', 1:'black'}    # shape
@@ -1475,29 +1478,49 @@ def plot_tree_typePost(df, child_col, parent_col, label_col, pred_col, save_path
             node_id = str(node)
         else:
             node_id = ""
-
+                        
+        # 2.1 assign type to soma
         if node == 1:
             type_true = type_pred = 1
+        elif label_col is None:
+            type_pred = df.loc[df[child_col] == node, pred_col].values[0]
         else:
             type_true = df.loc[df[child_col]==node, label_col].values[0]
             type_pred = df.loc[df[child_col]==node, pred_col].values[0]
 
-        if node == 1:
-            u.attr('node', shape='circle', color=dict1[type_true], penwidth='1', style='filled', fillcolor=dict0[type_pred])
-            u.node(str(node), label=node_id)
-        elif any([math.isnan(type_true), math.isnan(type_pred)]):
-            u.attr('node', shape='circle', color='black', penwidth='1', style='solid')
-            u.node(str(node), label=node_id)
-        elif type_true == type_pred:
-            u.attr('node', shape='circle', color=dict0[type_true], penwidth='1', style='filled', fillcolor=dict0[type_pred])
-            u.node(str(node), label=node_id)
-        else:
-            u.attr('node', shape='circle', color=dict1[type_true], penwidth='5', style='filled', fillcolor=dict0[type_pred])
-            u.node(str(node), label=node_id)
-        del type_true, type_pred
+        # 2.2 color the nodes
+        if label_col is None:   # WITHOUT label column
+            if node == 1:
+                u.attr('node', shape='circle', color='black', penwidth='1', style='filled', fillcolor=dict0[type_pred])
+                u.node(str(node), label=node_id)
+            elif math.isnan(type_pred):
+                u.attr('node', shape='circle', color='black', penwidth='1', style='solid')
+                u.node(str(node), label=node_id)
+            else:
+                u.attr('node', shape='circle', color=dict0[type_pred], penwidth='1', style='filled', fillcolor=dict0[type_pred])
+                u.node(str(node), label=node_id)
+            del type_pred
+            
+        else:   # label column
+            if node == 1:
+                u.attr('node', shape='circle', color=dict1[type_true], penwidth='1', style='filled',
+                       fillcolor=dict0[type_pred])
+                u.node(str(node), label=node_id)
+            elif any([math.isnan(type_true), math.isnan(type_pred)]):
+                u.attr('node', shape='circle', color='black', penwidth='1', style='solid')
+                u.node(str(node), label=node_id)
+            elif type_true == type_pred:
+                u.attr('node', shape='circle', color=dict0[type_true], penwidth='1', style='filled',
+                       fillcolor=dict0[type_pred])
+                u.node(str(node), label=node_id)
+            else:
+                u.attr('node', shape='circle', color=dict1[type_true], penwidth='5', style='filled',
+                       fillcolor=dict0[type_pred])
+                u.node(str(node), label=node_id)
+            del type_true, type_pred
 
-
-    # plot the link btw nodes (show distance on the link)
+            
+    # 3. plot the link btw nodes (show distance on the link)
     if branch_col is None:
         for index, row in df.iterrows():
             child = str(row[child_col])
@@ -1512,7 +1535,7 @@ def plot_tree_typePost(df, child_col, parent_col, label_col, pred_col, save_path
             u.edge(parent, child, label=label, arrowhead="none")
 
 
-    ### View/save the file
+    # View/save the file
     if view:
         main_folder_name = 'gv_graphs '
         if not os.path.exists(Desktop + main_folder_name):
@@ -4150,9 +4173,9 @@ def post_relabel(df, threshold=0.8, reduce_value=0.05):
         dendrite_like = False
         axon_like = False
         for j in range(len(lst)):
-            if df_lst[j][4] == 2:
+            if lst[j][4] == 2:
                 axon_like = True
-            elif df_lst[j][4] == 3:
+            elif lst[j][4] == 3:
                 dendrite_like = True
         if axon_like and dendrite_like:
             pass
@@ -5253,9 +5276,9 @@ def pyramid(df, feature_list, num_layer, th_layer, for_train=False, empty_number
                 else:
                     fulfill = True
 
-        # create train data
         if len(result) == 0:
             return pd.DataFrame([])
+        # create train data
         train_data = []
         label_data = []
         nrn = []
